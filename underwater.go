@@ -33,14 +33,56 @@ type sample struct {
 	Blue  float64
 }
 
+type rgbStats struct {
+	Samples int
+	Red     float64
+	Green   float64
+	Blue    float64
+	Spread  float64
+}
+
 func main() {
 	fps := flag.Float64("fps", 1, "frames to sample per second")
 	graphPath := flag.String("graph", "color_graph.png", "output PNG graph path")
 	csvPath := flag.String("csv", "color_data.csv", "output CSV data path")
+	statsPath := flag.String("stats", "", "read a CSV and print average RGB and spread")
+	compareMode := flag.Bool("compare", false, "compare two CSV files and print average RGB and spread deltas")
 	flag.Parse()
+
+	if *statsPath != "" {
+		if flag.NArg() != 0 {
+			fmt.Fprintf(os.Stderr, "usage: go run underwater.go -stats color_data.csv\n")
+			os.Exit(2)
+		}
+		stats, err := statsFromCSV(*statsPath)
+		if err != nil {
+			fatal(err)
+		}
+		printStats(filepath.Base(*statsPath), stats)
+		return
+	}
+
+	if *compareMode {
+		if flag.NArg() != 2 {
+			fmt.Fprintf(os.Stderr, "usage: go run underwater.go -compare original.csv corrected.csv\n")
+			os.Exit(2)
+		}
+		original, err := statsFromCSV(flag.Arg(0))
+		if err != nil {
+			fatal(fmt.Errorf("original CSV: %w", err))
+		}
+		corrected, err := statsFromCSV(flag.Arg(1))
+		if err != nil {
+			fatal(fmt.Errorf("corrected CSV: %w", err))
+		}
+		printComparison(filepath.Base(flag.Arg(0)), original, filepath.Base(flag.Arg(1)), corrected)
+		return
+	}
 
 	if flag.NArg() != 1 {
 		fmt.Fprintf(os.Stderr, "usage: go run underwater.go [-fps 1] [-graph color_graph.png] [-csv color_data.csv] input.mp4\n")
+		fmt.Fprintf(os.Stderr, "       go run underwater.go -stats color_data.csv\n")
+		fmt.Fprintf(os.Stderr, "       go run underwater.go -compare original.csv corrected.csv\n")
 		os.Exit(2)
 	}
 	if *fps <= 0 {
@@ -202,6 +244,79 @@ func writeCSV(path string, samples []sample) error {
 	}
 
 	return writer.Error()
+}
+
+func statsFromCSV(path string) (rgbStats, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return rgbStats{}, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return rgbStats{}, err
+	}
+	if len(records) < 2 {
+		return rgbStats{}, errors.New("CSV has no sample rows")
+	}
+
+	var stats rgbStats
+	for i, record := range records[1:] {
+		if len(record) != 4 {
+			return rgbStats{}, fmt.Errorf("row %d: expected 4 columns, got %d", i+2, len(record))
+		}
+		red, err := strconv.ParseFloat(record[1], 64)
+		if err != nil {
+			return rgbStats{}, fmt.Errorf("row %d red: %w", i+2, err)
+		}
+		green, err := strconv.ParseFloat(record[2], 64)
+		if err != nil {
+			return rgbStats{}, fmt.Errorf("row %d green: %w", i+2, err)
+		}
+		blue, err := strconv.ParseFloat(record[3], 64)
+		if err != nil {
+			return rgbStats{}, fmt.Errorf("row %d blue: %w", i+2, err)
+		}
+
+		stats.Samples++
+		stats.Red += red
+		stats.Green += green
+		stats.Blue += blue
+		stats.Spread += max3(red, green, blue) - min3(red, green, blue)
+	}
+
+	if stats.Samples == 0 {
+		return rgbStats{}, errors.New("CSV has no sample rows")
+	}
+	samples := float64(stats.Samples)
+	stats.Red /= samples
+	stats.Green /= samples
+	stats.Blue /= samples
+	stats.Spread /= samples
+	return stats, nil
+}
+
+func printStats(label string, stats rgbStats) {
+	fmt.Printf("%s\n", label)
+	fmt.Printf("samples: %d\n", stats.Samples)
+	fmt.Printf("average_rgb: red=%s green=%s blue=%s\n", formatFloat(stats.Red), formatFloat(stats.Green), formatFloat(stats.Blue))
+	fmt.Printf("average_spread: %s\n", formatFloat(stats.Spread))
+}
+
+func printComparison(originalLabel string, original rgbStats, correctedLabel string, corrected rgbStats) {
+	fmt.Printf("original: %s\n", originalLabel)
+	fmt.Printf("  samples: %d\n", original.Samples)
+	fmt.Printf("  average_rgb: red=%s green=%s blue=%s\n", formatFloat(original.Red), formatFloat(original.Green), formatFloat(original.Blue))
+	fmt.Printf("  average_spread: %s\n", formatFloat(original.Spread))
+	fmt.Printf("corrected: %s\n", correctedLabel)
+	fmt.Printf("  samples: %d\n", corrected.Samples)
+	fmt.Printf("  average_rgb: red=%s green=%s blue=%s\n", formatFloat(corrected.Red), formatFloat(corrected.Green), formatFloat(corrected.Blue))
+	fmt.Printf("  average_spread: %s\n", formatFloat(corrected.Spread))
+	fmt.Printf("delta_rgb: red=%s green=%s blue=%s\n", formatSignedFloat(corrected.Red-original.Red), formatSignedFloat(corrected.Green-original.Green), formatSignedFloat(corrected.Blue-original.Blue))
+	fmt.Printf("spread_delta: %s\n", formatSignedFloat(corrected.Spread-original.Spread))
+	fmt.Printf("spread_improvement: %s\n", formatSignedFloat(original.Spread-corrected.Spread))
 }
 
 func drawGraph(path string, samples []sample) error {
@@ -367,6 +482,13 @@ func formatFloat(v float64) string {
 	return strconv.FormatFloat(v, 'f', 3, 64)
 }
 
+func formatSignedFloat(v float64) string {
+	if v >= 0 {
+		return "+" + formatFloat(v)
+	}
+	return formatFloat(v)
+}
+
 func formatTick(v float64) string {
 	if v >= 100 {
 		return strconv.FormatFloat(v, 'f', 0, 64)
@@ -379,6 +501,14 @@ func abs(v int) int {
 		return -v
 	}
 	return v
+}
+
+func max3(a, b, c float64) float64 {
+	return math.Max(a, math.Max(b, c))
+}
+
+func min3(a, b, c float64) float64 {
+	return math.Min(a, math.Min(b, c))
 }
 
 var font5x7 = map[rune][7]byte{
