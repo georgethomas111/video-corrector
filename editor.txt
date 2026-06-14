@@ -1,0 +1,102 @@
+You are editing underwater GoPro videos in this folder.
+
+Raw input videos are in raw/. Do not modify, move, overwrite, or delete the raw videos.
+
+Only create, edit, move, or delete files inside the current project directory. Do not access or modify files outside this directory. Do not change opencode configuration, shell configuration, system files, package manager state, git configuration, or files under home directories outside this project.
+
+Use the existing Makefile targets:
+
+- make rgbGraph <video> GRAPH=<png> CSV=<csv> OPEN_GRAPH=0
+- make rgbCorrect <video> RED_GAIN=<r> GREEN_GAIN=<g> BLUE_GAIN=<b> CONTRAST=<c> SATURATION=<s> STABILIZE=<0-or-1>
+- make stitch OUTPUT=<video> STITCH_AUDIO=0
+
+Goal:
+
+For each video in raw/ that is not already named *_corrected.*, create a corrected video where the average red, green, and blue values are more balanced than the original while still looking natural.
+
+Workflow for each video:
+
+1. Create corrected/ and graphs/ if they do not already exist.
+2. Run rgbGraph on the original video with OPEN_GRAPH=0 and save its CSV/PNG in graphs/ with a unique name.
+3. Run rgbCorrect on the original video using these initial values:
+   RED_GAIN=1.30 GREEN_GAIN=1.05 BLUE_GAIN=0.90 CONTRAST=1.08 SATURATION=1.15 STABILIZE=0
+4. Run rgbGraph on the corrected video with OPEN_GRAPH=0 and save its CSV/PNG in graphs/ with a unique name.
+5. Compare the original CSV and corrected CSV.
+6. Score each attempt by minimizing the average RGB channel spread across all sampled frames:
+   spread = average(max(red, green, blue) - min(red, green, blue))
+7. Try up to 6 correction attempts per video.
+8. Keep the attempt with the lowest RGB spread that still avoids obvious clipping or unnatural color.
+9. Do not choose the best attempt by RGB spread alone. Reject an attempt even if it has the best spread if it looks too red, pink, orange, harsh, or unnatural in preview frames.
+10. Prefer a visually natural correction with a slightly larger spread over an overcorrected red/pink result with a very low spread.
+11. Copy the best final corrected video into corrected/ with the same base name and a _corrected suffix.
+12. After corrected videos are selected and copied into corrected/, use make stitch to create a final stitched video from the corrected videos.
+13. Leave raw/ originals unchanged.
+
+Adjustment guidance:
+
+- If red is much lower than green and blue, increase RED_GAIN.
+- If red becomes too high or the image looks pink/red, decrease RED_GAIN.
+- If blue is much higher than red and green, decrease BLUE_GAIN.
+- If blue becomes too low or the image looks yellow/orange, increase BLUE_GAIN.
+- If green is much higher than red and blue, decrease GREEN_GAIN.
+- If green becomes too low or the image looks magenta, increase GREEN_GAIN.
+- If the image looks dull after RGB balancing, increase SATURATION slightly.
+- If the image looks harsh, noisy, or clipped, reduce CONTRAST or reduce the strongest gain.
+- Use small changes between attempts. Prefer natural-looking footage over mathematically perfect RGB equality.
+- Do not use RED_GAIN above 1.55 by default.
+- RED_GAIN above 1.55 is allowed only if the original red average is extremely low and preview frames still look natural.
+- Never use RED_GAIN above 1.65 unless the user explicitly asks for a very aggressive correction.
+- If RED_GAIN is above 1.45, keep SATURATION at or below 1.12 and CONTRAST at or below 1.05 unless preview frames clearly show the image is still natural.
+- Prefer reducing GREEN_GAIN or BLUE_GAIN slightly over pushing RED_GAIN too high.
+- For videos containing fish, kelp, sand, or rocks, avoid making naturally neutral areas look red or pink. Fish and background should still look plausible underwater.
+
+Stabilization guidance:
+
+- Default to STABILIZE=0.
+- Use STABILIZE=1 only if the video visibly shakes and the extra processing time is acceptable.
+- If using stabilization, start with SMOOTHING=30 and ZOOM=5.
+- If stabilization leaves visible border movement, increase ZOOM slightly.
+
+Stitching guidance:
+
+- The stitch target combines videos from corrected/ in alphabetical order.
+- If raw/order.txt exists, the stitch target uses that order. Each entry refers to a raw filename and maps to corrected/<base>_corrected.<ext>.
+- If raw/order.txt does not exist, the stitch target combines videos from corrected/ in alphabetical order.
+- If a custom alphabetical order is needed without raw/order.txt, rename or copy the corrected videos with numeric prefixes such as 01_, 02_, and 03_ before stitching.
+- Use make stitch OUTPUT=stitched.mp4 STITCH_AUDIO=0 unless the user requests a different output name.
+- Final stitched scuba videos should be silent by default because scuba audio is usually poor.
+- Only use STITCH_AUDIO=1 if the user explicitly asks to keep audio.
+- Do not include raw videos in the stitched output unless the user explicitly asks for that.
+
+Output and cleanup rules:
+
+- Do not delete raw videos.
+- Do not run destructive cleanup commands unless they only remove temporary graph files or temporary transform files.
+- Do not overwrite a manually selected final output unless you are replacing it with a better scored attempt for the same source video.
+- Keep graph CSV/PNG outputs in graphs/ for review.
+- At the end, summarize each video with:
+  - original average RGB values
+  - final average RGB values
+  - original spread
+  - final spread
+  - settings used
+  - corrected output filename
+
+Makefile/tooling feedback:
+
+- After the per-video summary, include a separate section named "Makefile/tooling feedback".
+- In that section, list any Makefile targets, command options, helper scripts, or Go program features that would have made this correction workflow easier, safer, faster, or more accurate.
+- For each suggestion, include:
+  - proposed target or option name
+  - what problem it solves
+  - example command usage
+  - priority: high, medium, or low
+- Useful feedback examples include:
+  - a target to compute RGB spread automatically from CSV files
+  - a target to compare original and corrected graphs
+  - a target to batch-correct every video in raw/
+  - a target to copy the best attempt into corrected/
+  - a way for rgbCorrect to write to a custom output path
+  - a way to prevent overwriting previous attempts
+  - a target to extract preview frames or contact sheets
+  - a target to run correction attempts with predefined profiles

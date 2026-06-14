@@ -1,0 +1,24 @@
+# Video inputs and outputs
+*.mp4
+*.mov
+*.mkv
+*.avi
+
+# Generated analysis and preview outputs
+graphs/
+corrected/
+attempts/
+
+# Temporary processing files
+*.trf
+.concat_list.txt
+color_graph.png
+color_data.csv
+
+# Go build output
+underwater
+
+# Keep ordered source metadata under raw/
+!raw/
+raw/*
+!raw/order.txt
